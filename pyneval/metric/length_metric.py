@@ -6,7 +6,6 @@ from pyneval.metric.utils import edge_match_utils
 from pyneval.io import read_swc
 from pyneval.io import swc_writer
 from pyneval.metric.utils.metric_manager import get_metric_manager
-from pyneval.metric.utils import basic_utils
 
 metric_manager = get_metric_manager()
 
@@ -18,21 +17,23 @@ class LengthMetric(object):
 
     def __init__(self, config):
         # read config
-        self.radius_mode = config["radius_mode"]
-        self.radius_threshold = config["radius_threshold"]
-        self.length_threshold = config["length_threshold"]
+        self.rad_mode = config["rad_mode"]
+        self.rad_threshold = config["rad_threshold"]
+        self.len_threshold = config["len_threshold"]
         self.scale = config["scale"]
         self.debug = config["debug"]
+        self.detail_path = config.get("detail_path")
 
     def length_metric_run(self, gold_swc_tree=None, test_swc_tree=None,
-                          radius_threshold=-1.0, length_threshold=0.2):
+                          rad_threshold=-1.0, len_threshold=0.2):
         """
         get matched edge set and calculate recall and precision
         Args:
             gold_swc_tree(SwcTree):
             test_swc_tree(SwcTree):
-            radius_threshold(float): threshold of key point radius
-            length_threshold(float): threshold of length of the matching edges
+            rad_threshold(float): threshold of key point radius
+            len_threshold(float): threshold of length of the matching edges
+            debug(bool): list debug info ot not
         Returns:
             tuple: contain two values to demonstrate metric result
                 precision(float): percentage of total length of edges that are matched compared to test tree
@@ -43,8 +44,8 @@ class LengthMetric(object):
         # get matched edge set
         match_edges, test_match_length = edge_match_utils.get_match_edges(gold_swc_tree=gold_swc_tree,
                                                                           test_swc_tree=test_swc_tree,
-                                                                          radius_threshold=radius_threshold,
-                                                                          length_threshold=length_threshold,
+                                                                          rad_threshold=rad_threshold,
+                                                                          len_threshold=len_threshold,
                                                                           debug=self.debug)
         # calculate the sum of matched length and total length of gold and test tree
         match_length = 0.0
@@ -98,21 +99,23 @@ class LengthMetric(object):
         gold_swc_tree.set_node_type_by_topo(root_id=1)
         test_swc_tree.set_node_type_by_topo(root_id=5)
 
-        if self.radius_mode == 1:
-            self.radius_threshold *= -1
+        if self.rad_mode == 1:
+            self.rad_threshold *= -1
         # check every edge in test, if it is overlap with any edge in gold three
         recall, precision = self.length_metric_run(gold_swc_tree=gold_swc_tree,
                                                    test_swc_tree=test_swc_tree,
-                                                   radius_threshold=self.radius_threshold,
-                                                   length_threshold=self.length_threshold,
+                                                   rad_threshold=self.rad_threshold,
+                                                   len_threshold=self.len_threshold,
                                                    )
+        if self.detail_path:
+            swc_writer.swc_save(gold_swc_tree, config["detail_path"][:-4] + "_gold.swc")
+            swc_writer.swc_save(test_swc_tree, config["detail_path"][:-4] + "_test.swc")
         if self.debug:
             print("Recall = {}, Precision = {}".format(recall, precision))
 
         res = {
             "recall": recall,
-            "precision": precision,
-            "f1_score": basic_utils.get_f1score(recall=recall, precision=precision)
+            "precision": precision
         }
         return res, gold_swc_tree, test_swc_tree
 
@@ -152,3 +155,74 @@ def length_metric(gold_swc_tree, test_swc_tree, config):
 
     length_metric = LengthMetric(config)
     return length_metric.run(gold_swc_tree, test_swc_tree)
+
+
+if __name__ == "__main__":
+    goldTree = swc_node.SwcTree()
+    testTree = swc_node.SwcTree()
+    sys.setrecursionlimit(10000000)
+
+    model_name = ['real', 'm_sim', 'm_sim_mp', 'm_cyc', 'm_cyc_mp', 'm_mp']
+    org_rate = [0, 1, 50, 100, 150, 250]
+    image_name = ['6656_2304_22016', '6656_2304_21504', '34_23_10', '2_img', '3_img', '5_img']
+
+    root_dir = 'E:/Projects/Brain Tracing/unet/data/model/simGAN/exp_3'
+    image_name_temp = '6656_2304_22016'
+
+    gold_swc_dir = root_dir + '/gold/' + image_name_temp + '.gold.swc'
+    # goldTree.load("..\\..\\data\\lc\\sch\\gold\\Image4.swc")
+    goldTree.load(gold_swc_dir)
+
+
+    from pyneval.metric.utils import config_utils
+
+    config = config_utils.get_default_configs("length")
+    config_schema = config_utils.get_config_schema("length")
+    try:
+        jsonschema.validate(config, config_schema)
+    except Exception as e:
+        raise Exception("[Error: ]Error in analyzing config json file")
+    config["detail_path"] = "..\\..\\output\\length_output\\length_metric_detail.swc"
+
+    # test_swc_dir = root_dir + '/result_adj/origin/' + image_name_temp + '.swc'
+    # testTree.load(test_swc_dir)
+    # lm_res, _, _ = length_metric(gold_swc_tree=testTree,
+    #                              test_swc_tree=goldTree,
+    #                              config=config)
+    #
+    # f1 = 2 * lm_res["recall"] * lm_res["precision"] / (lm_res["recall"] + lm_res["precision"] + 0.000001)
+    # print("precision = {}\n"
+    #       "recall = {}\n"
+    #       "f1_score = {}%".format(lm_res["precision"], lm_res["recall"], round(f1, 3)))
+    # pause
+
+
+
+    for model_name_temp in model_name:
+        for org_rate_temp in org_rate:
+            testTree = swc_node.SwcTree()
+            # test_swc_dir = root_dir + '/result_adj/origin/' + image_name_temp + '.swc'
+            test_swc_dir = root_dir + '/result_old/' + model_name_temp + '/' + image_name_temp + '.' + str(org_rate_temp) + '.swc'
+            testTree.load(test_swc_dir)
+
+            lm_res,_,_ = length_metric(gold_swc_tree=goldTree,
+                                   test_swc_tree=testTree,
+                                   config=config)
+
+            f1 = 2 * lm_res["recall"] * lm_res["precision"] / (lm_res["recall"] + lm_res["precision"] + 0.000001)
+
+            print("model = {:10} rate = {} precision = {:5} recall = {:5} f1_score = {}".format(model_name_temp, org_rate_temp, round(lm_res["precision"],3) ,round(lm_res["recall"],3), round(f1, 3)))
+            # print("precision = {}\n"
+            #       "recall = {}\n"
+            #       "f1_score = {}%".format(lm_res["precision"], lm_res["recall"], round(f1, 3)))
+        print("========================================================================")
+    #
+
+    # lm_res, _, _ = length_metric(gold_swc_tree=testTree,
+    #                              test_swc_tree=goldTree,
+    #                              config=config)
+    #
+    # print("recall    = {}\n"
+    #       "precision = {}\n"
+    #       "f1        = {}".format(lm_res["recall"], lm_res["precision"], (
+    #             lm_res["recall"] * lm_res["precision"] * 2 / (lm_res["recall"] + lm_res["precision"]))))
